@@ -294,6 +294,10 @@ pub fn live_check(cfg: &Config) -> Result<Value, String> {
                 let state = match (&expected, fetch.status) {
                     (Some(exp), 200) if *exp == body_hash => "match",
                     (Some(_), 200) => "drift",
+                    // No deploy baseline yet: the page is simply
+                    // observed. (First calibration run mislabeled
+                    // this "error-status" on healthy 200s.)
+                    (None, 200) => "observed",
                     (_, 404) => "missing",
                     _ => "error-status",
                 };

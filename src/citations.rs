@@ -40,8 +40,20 @@ pub struct Citation {
     pub kind: CitationKind,
 }
 
+/// Decode the HTML entities that can appear inside a printed
+/// reference (SICI DOIs carry `<`/`>`, entity-encoded in pages).
+fn decode_entities(html: &str) -> String {
+    html.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
 /// Extract citations from one HTML document's text.
 pub fn extract_citations(html: &str) -> Vec<Citation> {
+    let decoded = decode_entities(html);
+    let html = decoded.as_str();
     let mut found: Vec<Citation> = Vec::new();
     let mut seen: BTreeSet<String> = BTreeSet::new();
     // DOIs.
@@ -50,8 +62,30 @@ pub fn extract_citations(html: &str) -> Vec<Citation> {
     while i + 3 < bytes.len() {
         if &bytes[i..i + 3] == b"10." {
             let mut j = i;
-            while j < bytes.len() && is_doi_char(bytes[j]) {
-                j += 1;
+            let mut angle_open = false;
+            while j < bytes.len() {
+                let b = bytes[j];
+                if is_doi_char(b) {
+                    j += 1;
+                } else if b == b'<'
+                    && !angle_open
+                    && html[i..j].to_lowercase().contains("(sici")
+                    && bytes
+                        .get(j + 1)
+                        .map(|n| n.is_ascii_digit())
+                        .unwrap_or(false)
+                {
+                    // SICI infix: <...> belongs to the DOI only
+                    // in the (SICI) shape, opening on a digit —
+                    // an HTML tag never matches that shape.
+                    angle_open = true;
+                    j += 1;
+                } else if b == b'>' && angle_open {
+                    angle_open = false;
+                    j += 1;
+                } else {
+                    break;
+                }
             }
             let raw = &html[i..j];
             if let Some(doi) = normalize_doi(raw)
@@ -104,6 +138,8 @@ fn is_doi_org_url(url: &str) -> bool {
 }
 
 fn is_doi_char(b: u8) -> bool {
+    // Angle brackets are handled by the caller's SICI rule, not
+    // here: a bare '<' after a DOI is an HTML tag, not identifier.
     b.is_ascii_alphanumeric()
         || matches!(
             b,
@@ -160,12 +196,27 @@ fn strip_trailing_punct(url: &str) -> &str {
     &url[..end]
 }
 
-/// Extract the deduplicated citation set of a whole dist tree
-/// (all .html files), sorted by key for determinism.
-pub fn extract_from_dist(dist: &Path) -> Result<Vec<Citation>, String> {
+/// Extract the deduplicated citation set of a dist tree, sorted
+/// by key for determinism.
+///
+/// Scope is the reference-carrying sections — `research/` (the
+/// manuscript study pages and their works-cited lists) and
+/// `standards/` (the Tiger Style reference pages). Everything
+/// else in dist is documentation and product copy whose URLs are
+/// links, not citations (the links gate owns those); the first
+/// calibration run proved the point by harvesting 709 URLs —
+/// code samples and all — against the ~230 references the site
+/// actually lists. URLs on the site's own host are internal
+/// references, likewise the links gate's business, and are
+/// excluded here.
+pub fn extract_from_dist(dist: &Path, site_host: &str) -> Result<Vec<Citation>, String> {
     let mut keys: BTreeSet<String> = BTreeSet::new();
     let mut citations: Vec<Citation> = Vec::new();
-    let mut stack = vec![dist.to_path_buf()];
+    let mut stack: Vec<std::path::PathBuf> = ["research", "standards"]
+        .iter()
+        .map(|section| dist.join(section))
+        .filter(|p| p.is_dir())
+        .collect();
     while let Some(dir) = stack.pop() {
         let entries =
             std::fs::read_dir(&dir).map_err(|e| format!("read {}: {e}", dir.display()))?;
@@ -177,6 +228,11 @@ pub fn extract_from_dist(dist: &Path) -> Result<Vec<Citation>, String> {
                 let html = std::fs::read_to_string(&path)
                     .map_err(|e| format!("read {}: {e}", path.display()))?;
                 for citation in extract_citations(&html) {
+                    if let CitationKind::Url(url) = &citation.kind
+                        && url.contains(site_host)
+                    {
+                        continue;
+                    }
                     if keys.insert(citation.key.clone()) {
                         citations.push(citation);
                     }
@@ -199,6 +255,7 @@ pub fn extract_from_dist(dist: &Path) -> Result<Vec<Citation>, String> {
 pub struct Verifier {
     pub crossref_base: String,
     pub datacite_base: String,
+    pub doi_base: String,
 }
 
 impl Default for Verifier {
@@ -206,6 +263,7 @@ impl Default for Verifier {
         Verifier {
             crossref_base: "https://api.crossref.org".to_string(),
             datacite_base: "https://api.datacite.org".to_string(),
+            doi_base: "https://doi.org".to_string(),
         }
     }
 }
@@ -249,9 +307,14 @@ impl CitationReport {
 
 fn percent_encode_doi(doi: &str) -> String {
     // Crossref/DataCite path segments: '/' must survive (it is the
-    // prefix/suffix separator both APIs accept), spaces and
-    // control characters may not appear in a normalized DOI.
+    // prefix/suffix separator both APIs accept); spaces and the
+    // URI-hostile characters of the SICI repertoire encode.
     doi.replace(' ', "%20")
+        .replace('<', "%3C")
+        .replace('>', "%3E")
+        .replace('#', "%23")
+        .replace('?', "%3F")
+        .replace('"', "%22")
 }
 
 impl Verifier {
@@ -356,12 +419,15 @@ impl Verifier {
             }
             Ok(fetch) if fetch.status == 404 => match self.datacite_lookup(doi) {
                 Some(result) => result,
-                None => (
-                    class_for_doi(doi, None),
-                    Err(HostilityOr::Failed(
-                        "not found at Crossref or DataCite".to_string(),
-                    )),
-                ),
+                None => match self.doi_org_lookup(doi) {
+                    Some(result) => result,
+                    None => (
+                        class_for_doi(doi, None),
+                        Err(HostilityOr::Failed(
+                            "not found at Crossref, DataCite, or doi.org".to_string(),
+                        )),
+                    ),
+                },
             },
             Ok(fetch) => (
                 class_for_doi(doi, None),
@@ -408,6 +474,41 @@ impl Verifier {
         }
     }
 
+    /// Final route: the resolver of record. A CSL 200 carries
+    /// the class; a redirect proves registration (some
+    /// registrants — ResearchGate's 10.13140 — resolve without
+    /// serving CSL). A DOI that fails even here is a true dead
+    /// citation (measured on the live reference lists 2026-11-10:
+    /// the 10.1136 meeting abstracts answer 404 at doi.org
+    /// itself).
+    fn doi_org_lookup(&self, doi: &str) -> Option<(String, Result<String, HostilityOr>)> {
+        let url = format!("{}/{}", self.doi_base, percent_encode_doi(doi));
+        match http::get_no_redirect(&url, Some("application/vnd.citationstyles.csl+json")) {
+            Ok((200, body)) => {
+                let body = String::from_utf8_lossy(&body).to_string();
+                if let Some(patterns) = hostile_in(&body) {
+                    return Some(("hostile".to_string(), Err(HostilityOr::Hostile(patterns))));
+                }
+                Some((csl_class(&body, doi), Ok(format!("doi.org: {doi}"))))
+            }
+            Ok((status, _)) if (300..400).contains(&status) => Some((
+                class_for_doi(doi, None),
+                Ok(format!("doi.org: resolves (HTTP {status})")),
+            )),
+            Ok((404 | 410, _)) => None,
+            Ok((status, _)) => Some((
+                class_for_doi(doi, None),
+                Err(HostilityOr::Failed(format!(
+                    "doi.org answered HTTP {status}"
+                ))),
+            )),
+            Err(e) => Some((
+                class_for_doi(doi, None),
+                Err(HostilityOr::Failed(format!("doi.org fetch: {e}"))),
+            )),
+        }
+    }
+
     /// URL route (reports, documentation, software pages without
     /// DOIs): any HTTP response proves the reference exists —
     /// publisher bot-walls (403) are liveness, not absence. Only
@@ -429,8 +530,22 @@ impl Verifier {
                         "URL answers HTTP {} (server error)",
                         fetch.status
                     ))),
-                    status => Ok(format!("url: HTTP {status}")),
+                    status => Ok(format!(
+                        "url: HTTP {status}{}",
+                        if fetch.truncated {
+                            " (body truncated; scan covered the received prefix)"
+                        } else {
+                            ""
+                        }
+                    )),
                 }
+            }
+            Err(e) if e.contains("too many redirects") => {
+                // A redirect loop is a publisher bot-wall (measured
+                // on publons.com): the server answers — repeatedly.
+                // Under this route's doctrine that is liveness,
+                // not absence; only silence or a gone-status fails.
+                Ok("url: redirect chain (bot-wall liveness)".to_string())
             }
             Err(e) => Err(HostilityOr::Failed(format!("url fetch: {e}"))),
         };
@@ -469,6 +584,28 @@ fn crossref_class(body: &str, doi: &str) -> String {
         "report" => "report".to_string(),
         "dataset" => "dataset".to_string(),
         "posted-content" => "preprint".to_string(),
+        _ => class_for_doi(doi, Some("other")),
+    }
+}
+
+/// Class from a doi.org CSL record: type mapping + self
+/// detection via publisher (fix 3 on the resolver route).
+fn csl_class(body: &str, doi: &str) -> String {
+    let parsed: Value = serde_json::from_str(body).unwrap_or(Value::Null);
+    let publisher = parsed
+        .get("publisher")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase();
+    if publisher.contains("qompass") {
+        return "self".to_string();
+    }
+    match parsed.get("type").and_then(Value::as_str).unwrap_or("") {
+        "article-journal" | "article" => "journal".to_string(),
+        "paper-conference" => "conference".to_string(),
+        "book" | "chapter" => "book".to_string(),
+        "report" => "report".to_string(),
+        "dataset" => "dataset".to_string(),
         _ => class_for_doi(doi, Some("other")),
     }
 }
@@ -549,6 +686,20 @@ mod tests {
     }
 
     #[test]
+    fn extractor_decodes_sici_angle_brackets() {
+        // The real kintsugi reference, as printed in the page:
+        // entity-encoded SICI DOI. The angle segment belongs to
+        // the identifier; the closing </p> after it does not.
+        let html = "<p>10.1002/(sici)1097-0258(19980430)17:8&lt;857::aid-sim777&gt;3.0.co;2-e</p>";
+        let citations = extract_citations(html);
+        assert_eq!(citations.len(), 1, "{citations:?}");
+        assert_eq!(
+            citations[0].key,
+            "10.1002/(sici)1097-0258(19980430)17:8<857::aid-sim777>3.0.co;2-e"
+        );
+    }
+
+    #[test]
     fn extractor_keeps_balanced_parentheses_in_doi() {
         let html = "<p>10.1002/(SICI)1097-0134(1996)123</p>";
         let citations = extract_citations(html);
@@ -612,9 +763,13 @@ mod tests {
                     200,
                     r#"{"data": {"attributes": {"publisher": "arXiv", "types": {"resourceTypeGeneral": "Text"}}}}"#,
                 ),
-                // Both registries miss it.
+                // Both registries miss it; doi.org 404s too
+                // (the bare path is unrouted below).
                 "/works/10.9999/ghost" => (404, "not found"),
                 "/dois/10.9999/ghost" => (404, "not found"),
+                // Registries miss it, but the resolver redirects:
+                // registered (the ResearchGate shape).
+                "/10.13140/rg.2.1" => (302, ""),
                 // A hostile Crossref record body (H3 through the
                 // metadata route itself).
                 "/works/10.7777/poisoned" => (
@@ -649,7 +804,8 @@ mod tests {
         let base = registry_double();
         let verifier = Verifier {
             crossref_base: base.clone(),
-            datacite_base: base,
+            datacite_base: base.clone(),
+            doi_base: base,
         };
         let (dir, mut registry) = temp_registry();
         let report = verifier.verify_all(
@@ -657,11 +813,12 @@ mod tests {
                 doi("10.1000/journal.1"),
                 doi("10.5281/zenodo.42"),
                 doi("10.48550/arxiv.2401.00001"),
+                doi("10.13140/rg.2.1"),
             ],
             &mut registry,
         );
-        assert_eq!(report.total, 3);
-        assert_eq!(report.verified, 3, "failures: {:?}", report.failures.len());
+        assert_eq!(report.total, 4);
+        assert_eq!(report.verified, 4, "failures: {:?}", report.failures.len());
         let classes: Vec<&str> = report.by_class.iter().map(|(c, _)| c.as_str()).collect();
         assert!(classes.contains(&"journal"), "{classes:?}");
         assert!(classes.contains(&"software"), "{classes:?}");
@@ -674,7 +831,8 @@ mod tests {
         let base = registry_double();
         let verifier = Verifier {
             crossref_base: base.clone(),
-            datacite_base: base,
+            datacite_base: base.clone(),
+            doi_base: base,
         };
         let (dir, mut registry) = temp_registry();
         let report = verifier.verify_all(

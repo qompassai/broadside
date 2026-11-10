@@ -284,8 +284,18 @@ pub fn verify(cfg: &Config, expected_hash: Option<&str>) -> Result<Value, String
         Err(e) => gates.push(gate("dist_manifest", "fail", e)),
     }
 
-    // Gate: citations (with the H3 quarantine hook).
-    match extract_from_dist(&dist) {
+    // Gate: citations (with the H3 quarantine hook). Scope is
+    // the reference sections; the site's own host is excluded
+    // (internal references belong to the links gate).
+    let site_host = cfg
+        .base_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split(['/', ':'])
+        .next()
+        .unwrap_or("qompass.ai")
+        .to_string();
+    match extract_from_dist(&dist, &site_host) {
         Ok(citations) => {
             let mut registry = SourceRegistry::load(cfg.sources_path())?;
             let report = Verifier::default().verify_all(&citations, &mut registry);

@@ -3,6 +3,7 @@
 //! an unbounded fetch in a verification path is a hang waiting for
 //! a hostile server to schedule it.
 
+use std::io::Read as _;
 use std::time::Duration;
 
 /// Response body bound (4 MiB): pages and registry records are far
@@ -19,14 +20,42 @@ pub struct Fetch {
 }
 
 fn agent() -> Result<ureq::Agent, String> {
+    agent_with_redirects(5)
+}
+
+fn agent_with_redirects(max_redirects: u32) -> Result<ureq::Agent, String> {
     let config = ureq::Agent::config_builder()
         .timeout_connect(Some(CONNECT_TIMEOUT))
         .timeout_recv_body(Some(READ_TIMEOUT))
         .timeout_recv_response(Some(READ_TIMEOUT))
         .http_status_as_error(false)
+        .max_redirects(max_redirects)
         .user_agent("broadside-mcp/1.0.0 (qompass.ai verification; +https://qompass.ai/solutions/mcp/broadside)")
         .build();
     Ok(ureq::Agent::new_with_config(config))
+}
+
+/// GET without following redirects; returns (status, body).
+/// The doi.org route needs the redirect itself as the evidence:
+/// a 3xx from the resolver of record proves registration even
+/// when the landing publisher serves no metadata.
+pub fn get_no_redirect(url: &str, accept: Option<&str>) -> Result<(u16, Vec<u8>), String> {
+    let agent = agent_with_redirects(0)?;
+    let mut request = agent.get(url);
+    if let Some(accept) = accept {
+        request = request.header("Accept", accept);
+    }
+    let mut response = request
+        .call()
+        .map_err(|e| format!("fetch {url} failed: {e}"))?;
+    let status = response.status().as_u16();
+    let mut body = Vec::new();
+    let _ = response
+        .body_mut()
+        .as_reader()
+        .take(MAX_BODY_BYTES + 1)
+        .read_to_end(&mut body);
+    Ok((status, body))
 }
 
 /// GET `url`. Transport failures are Err; any HTTP status is Ok —
@@ -47,13 +76,22 @@ pub fn get_with_accept(url: &str, accept: Option<&str>) -> Result<Fetch, String>
         .call()
         .map_err(|e| format!("fetch {url} failed: {e}"))?;
     let status = response.status().as_u16();
-    let body = response
+    // Bounded read by hand: an oversized body truncates (and the
+    // truncation is reported), it does not fail the fetch — the
+    // ECMA-262 single-page spec is >4 MiB and is a legitimate
+    // citation target whose existence is the question at hand.
+    // A mid-body read failure (slow host, receive timeout)
+    // likewise returns what arrived with truncated set: the
+    // status line already proved existence, and the caller's
+    // content scan runs over the received prefix, bounded and
+    // disclosed — silence before any response stays an Err.
+    let mut body = Vec::new();
+    let read = response
         .body_mut()
-        .with_config()
-        .limit(MAX_BODY_BYTES + 1)
-        .read_to_vec()
-        .map_err(|e| format!("reading {url} body failed: {e}"))?;
-    let truncated = body.len() as u64 > MAX_BODY_BYTES;
+        .as_reader()
+        .take(MAX_BODY_BYTES + 1)
+        .read_to_end(&mut body);
+    let truncated = body.len() as u64 > MAX_BODY_BYTES || read.is_err();
     Ok(Fetch {
         status,
         body,
