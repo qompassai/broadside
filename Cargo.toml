@@ -1,0 +1,28 @@
+[package]
+name = "broadside-mcp"
+version = "1.0.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Deterministic build, verify, and deploy MCP server for qompass.ai: signed JWKS publication, append-only receipts, honeypot canary layer."
+repository = "https://github.com/qompassai/broadside"
+homepage = "https://qompass.ai/solutions/mcp/broadside"
+
+[[bin]]
+name = "broadside-mcp"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+ed25519-dalek = "2"
+# WS2 (D-113): framing moves to the official Rust MCP SDK, modern era
+# only (2026-07-28). The version pin is the fleet pin — one rmcp
+# version across every estate server; bumps are single fleet events.
+rmcp = { version = "=3.8.0", default-features = false, features = ["server"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[profile.release]
+lto = true

@@ -1,0 +1,25 @@
+# Tarpit block for the qompass.ai Caddyfile (HONEYPOT.md H4).
+#
+# NOT a standalone Caddyfile: this fragment is merged into the
+# host's qompass.ai site block by the Owner (or by
+# regenerate-tarpit.sh under the Owner's hand). Flagged IPs —
+# rendered from broadside's blocklist feed between the markers —
+# are served the decoy tree at /var/www/tarpit and never reach
+# the real site. Everyone else falls through to the real block.
+#
+# The decoy tree is a static lookalike with no real content and
+# no credentials (the canary credential lives only in the dist
+# decoys planted by the signed manifest).
+
+@flagged {
+	# === BROADSIDE FEED BEGIN ===
+	remote_ip 192.0.2.1
+	# === BROADSIDE FEED END ===
+}
+handle @flagged {
+	root * /var/www/tarpit
+	file_server
+	log {
+		output file /var/log/caddy/qompass.ai.tarpit.log
+	}
+}

@@ -1,0 +1,43 @@
+# bacon.toml — broadside
+#
+# Bacon job definitions. The estate's Rust diagnostics route
+# (theodolite → bacon-ls) reads the `.bacon-locations` export
+# this file's bacon-ls job produces: `bacon --headless -j
+# bacon-ls` must run in the workspace before a theodolite
+# session starts (the locations file is read at session start).
+# The line_format is a single line by design — the wrapped
+# multi-line form eats a separator and malforms every record
+# (theodolite Rust-route review, 2026-11-10).
+
+default_job = "clippy"
+
+[jobs.check]
+command = ["cargo", "check", "--workspace", "--all-targets", "--color", "always"]
+need_stdout = false
+
+[jobs.clippy]
+command = [
+    "cargo", "clippy",
+    "--workspace", "--all-targets", "--color", "always",
+    "--", "-D", "warnings",
+]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--workspace", "--color", "always"]
+need_stdout = false
+
+[jobs.bacon-ls]
+command = [
+    "cargo", "clippy",
+    "--workspace", "--all-targets",
+    "--message-format", "json-diagnostic-rendered-ansi",
+]
+analyzer = "cargo_json"
+need_stdout = true
+
+[exports.cargo-json-spans]
+auto = true
+exporter = "analyzer"
+line_format = "{diagnostic.level}|:|{span.file_name}|:|{span.line_start}|:|{span.line_end}|:|{span.column_start}|:|{span.column_end}|:|{diagnostic.message}|:|{diagnostic.rendered}|:|{span.suggested_replacement}"
+path = ".bacon-locations"
