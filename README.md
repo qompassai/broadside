@@ -21,7 +21,7 @@ hack-back, ever.
 <!-- tracker:start -->
 ![broadside progress tracker](assets/tracker.svg)
 
-**25% — 7 of 28 gates closed — updated 2026-10-21.**
+**68% — 19 of 28 gates closed (2 more delivered, ungated) — updated 2026-11-10.**
 Full record: [CHECKLIST.md](CHECKLIST.md) — every item traces to a stage gate in the program documents; the bar moves only on gated evidence.
 <!-- tracker:end -->
 

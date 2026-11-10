@@ -1,6 +1,6 @@
 ---
 repo: broadside
-updated: 2026-10-21
+updated: 2026-11-10
 tracker_generation: 1
 memory_home: .ai/memory/
 attention_board: trackers
@@ -28,29 +28,29 @@ moves only when an item's state changes at a gate.
 
 ## P0 — census & pin-down
 
-- [ ] Site workflow run by hand once, end to end, on primo (exact build command, generator home, verifier scripts, deploy mechanics, key path, target — each verified on the machine)
-- [ ] broadside.receipt v1 schema specified
+- [x] Site workflow run by hand once, end to end, on primo (exact build command, generator home, verifier scripts, deploy mechanics, key path, target — each verified on the machine)
+- [x] broadside.receipt v1 schema specified
 
 ## P1 — read core
 
-- [ ] broadside_status + broadside_live_check landed, with the append-only receipt log (status reads receipts, never guesses)
-- [ ] Live check covers the JWKS read-back against the deployed manifest and the canary-log read-back (H1)
-- [ ] SERVERS.md entry lands; the conformance loop picks broadside up
+- [x] broadside_status + broadside_live_check landed, with the append-only receipt log (status reads receipts, never guesses)
+- [x] Live check covers the JWKS read-back against the deployed manifest and the canary-log read-back (H1)
+- [x] SERVERS.md entry lands; the conformance loop picks broadside up
 
 ## P2 — build + verify
 
-- [ ] broadside_build + broadside_verify landed (the gate battery, evidence-exact: tests, generated-data freshness, link/figure checks, dist manifest hash)
-- [ ] The three citation-verifier fixes absorbed as acceptance criteria (DataCite fallback for 10.48550/*, extractor dedupe + punctuation strip, citation classes verified by route)
-- [ ] Honeypot manifest + canary injection at build; canary integrity checked in verify (H1 endpoints, H2 canary credentials)
-- [ ] H3 injection quarantine in the fetch pipeline (hostile sources blacklisted and never citable again; citations fail closed)
-- [ ] H6 manifest signing enforced (signature checked before injection; deploy refuses a dist whose canary set matches no validly signed manifest) and the JWKS artifact placed at build, verified against the signed key record
+- [x] broadside_build + broadside_verify landed (the gate battery, evidence-exact: tests, generated-data freshness, link/figure checks, dist manifest hash)
+- [x] The three citation-verifier fixes absorbed as acceptance criteria (DataCite fallback for 10.48550/*, extractor dedupe + punctuation strip, citation classes verified by route)
+- [x] Honeypot manifest + canary injection at build; canary integrity checked in verify (H1 endpoints, H2 canary credentials)
+- [x] H3 injection quarantine in the fetch pipeline (hostile sources blacklisted and never citable again; citations fail closed)
+- [x] H6 manifest signing enforced (signature checked before injection; deploy refuses a dist whose canary set matches no validly signed manifest) and the JWKS artifact placed at build, verified against the signed key record
 
 ## P3 — deploy + vongola hookup
 
-- [ ] broadside_deploy landed (one dist hash, only with a passing verify receipt for that identical hash; per-call confirm; flowguard label on the trajectory; live read-back written into the deploy receipt — a failed read-back is a failed deploy)
-- [ ] Vongola consumes the receipt log — the site pipeline becomes an observed system (read-only, inside vongola's charter)
-- [ ] H4 blocklist + tarpit on the site host (fail2ban fed by canary hits; entries expire at 30 days; the Owner's addresses and scanners allowlisted first)
-- [ ] H5 evidence packets assembled (hash-chained to vongola receipts; broadside drafts the abuse report; sending is Owner-stamped only)
+- [x] broadside_deploy landed (one dist hash, only with a passing verify receipt for that identical hash; per-call confirm; flowguard label on the trajectory; live read-back written into the deploy receipt — a failed read-back is a failed deploy) — gated 2026-11-10 against a local staging target (D-1246 boundary: no production deploy; the confirmation + identical-hash + read-back trajectory is receipted end to end, seq 1–5 of the fixture chain; the flowguard label rides the caller's trajectory, the receipt carries the confirmation provenance)
+- [~] Vongola consumes the receipt log — the site pipeline becomes an observed system (read-only, inside vongola's charter) — seam delivered 2026-11-10 (docs/VONGOLA-SEAM.md: log path, schema, read-only reader contract); vongola-side pickup is vongola's own change and has not landed, so the consumption itself is ungated
+- [~] H4 blocklist + tarpit on the site host (fail2ban fed by canary hits; entries expire at 30 days; the Owner's addresses and scanners allowlisted first) — code + config landed IN THE REPO only (deploy/honeypot/: fail2ban filter/jail shipped disabled, tarpit fragment, regenerate script; `broadside-mcp feed` renders the decayed blocklist); nothing was applied to any host — host application is the Owner's word
+- [x] H5 evidence packets assembled (hash-chained over the receipt log vongola consumes; broadside drafts the abuse report; sending is Owner-stamped only) — gated 2026-11-10: `broadside-mcp packet` assembled the fixture chain (5 receipts, packet hash recorded); unsigned by default (draft-unsigned) without BROADSIDE_PACKET_KEY_FILE
 
 ## P4 — second tenant + signed manifests
 
