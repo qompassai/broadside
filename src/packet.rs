@@ -224,4 +224,18 @@ mod tests {
         assert!(assemble_packet(&cfg, &dir.join("out")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn packet_refuses_a_tampered_log() {
+        // Adversarial: an evidence packet over a broken chain
+        // would launder edited history; assembly must refuse.
+        let (dir, cfg) = cfg_with_receipts();
+        let log = cfg.receipts();
+        let path = log.path().to_path_buf();
+        let raw = std::fs::read_to_string(&path).expect("raw");
+        let tampered = raw.replacen("\"alert\"", "\"pass\"", 1);
+        std::fs::write(&path, tampered).expect("tamper");
+        assert!(assemble_packet(&cfg, &dir.join("out")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

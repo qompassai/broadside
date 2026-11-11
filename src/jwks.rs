@@ -199,4 +199,22 @@ mod tests {
         let dir = std::env::temp_dir().join("broadside-no-record-xyz");
         assert!(load_key_record(&dir).expect("ok").is_none());
     }
+
+    #[test]
+    fn record_with_wrong_curve_is_rejected_at_load() {
+        // Adversarial: a record naming a non-Ed25519 curve must
+        // not load as an Agent Card key, whatever its signature.
+        let (mut value, _) = fixture_record(false);
+        value["crv"] = json!("P-256");
+        let dir = std::env::temp_dir().join(format!("broadside-jwks-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("keys")).expect("mkdir");
+        std::fs::write(
+            dir.join(RECORD_PATH),
+            serde_json::to_string(&value).expect("serialize"),
+        )
+        .expect("write record");
+        assert!(load_key_record(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

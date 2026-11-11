@@ -272,4 +272,47 @@ mod tests {
         assert_eq!(log.read_all().expect("empty ok").len(), 0);
         assert!(log.latest("build", None).expect("latest ok").is_none());
     }
+
+    #[test]
+    fn truncated_final_line_fails_closed() {
+        // Adversarial: a log cut short mid-line (crash during
+        // append, or a hostile truncation) must not read back as
+        // a shorter valid history.
+        let (dir, log) = temp_log();
+        log.append(
+            json!({"action": "build", "result": "pass", "inputs": {}, "outputs": {}, "gates": []}),
+        )
+        .expect("append 1");
+        log.append(
+            json!({"action": "verify", "result": "pass", "inputs": {}, "outputs": {}, "gates": []}),
+        )
+        .expect("append 2");
+        let path = log.path().to_path_buf();
+        let raw = std::fs::read_to_string(&path).expect("raw");
+        let cut = raw.len() - 10;
+        std::fs::write(&path, &raw[..cut]).expect("truncate");
+        assert!(log.read_all().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleted_middle_receipt_fails_closed() {
+        // Adversarial: deleting one receipt from the middle
+        // leaves a sequence gap the chain check must catch.
+        let (dir, log) = temp_log();
+        for action in ["build", "verify", "deploy"] {
+            log.append(
+                json!({"action": action, "result": "pass", "inputs": {}, "outputs": {}, "gates": []}),
+            )
+            .expect("append");
+        }
+        let path = log.path().to_path_buf();
+        let raw = std::fs::read_to_string(&path).expect("raw");
+        let mut lines: Vec<&str> = raw.lines().collect();
+        assert_eq!(lines.len(), 3);
+        lines.remove(1);
+        std::fs::write(&path, format!("{}\n", lines.join("\n"))).expect("rewrite");
+        assert!(log.read_all().is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

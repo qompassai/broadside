@@ -105,4 +105,18 @@ mod tests {
         assert!(!ed25519_verify(&public, b"broadside", &signature[..32]));
         assert!(!ed25519_verify(&[], b"", &[]));
     }
+
+    #[test]
+    fn malformed_key_and_signature_lengths_are_rejected() {
+        // Adversarial: truncated or oversized key/signature
+        // material verifies as false, never panics.
+        let (public, signature) = sign_for_fixture(&[7u8; 32], b"msg");
+        assert!(ed25519_verify(&public, b"msg", &signature));
+        assert!(!ed25519_verify(&public[..16], b"msg", &signature));
+        assert!(!ed25519_verify(&public, b"msg", &signature[..32]));
+        assert!(!ed25519_verify(&[], b"msg", &[]));
+        let mut long_sig = signature.to_vec();
+        long_sig.push(0);
+        assert!(!ed25519_verify(&public, b"msg", &long_sig));
+    }
 }

@@ -72,10 +72,17 @@ pub fn load_manifest(site_root: &Path) -> Result<Option<(Manifest, Value)>, Stri
     if manifest.canaries.is_empty() || manifest.canaries.len() > 64 {
         return Err("honeypot manifest canary count outside 1..=64".to_string());
     }
+    let mut seen_relpaths = std::collections::HashSet::new();
     for canary in &manifest.canaries {
         validate_canary_path(&canary.path)?;
         if canary.kind != "env" && canary.kind != "page" {
             return Err(format!("unknown canary kind {}", canary.kind));
+        }
+        // Two canaries landing on one dist file would let the
+        // second silently stand in for the first at injection;
+        // duplicates are a manifest defect, rejected fail-closed.
+        if !seen_relpaths.insert(canary_relpath(&canary.path)) {
+            return Err(format!("duplicate canary target for path {}", canary.path));
         }
     }
     Ok(Some((manifest, value)))
@@ -336,5 +343,65 @@ mod tests {
         assert!(validate_canary_path("/").is_err());
         assert!(validate_canary_path("/.well-known/jwks.json").is_err());
         assert!(validate_canary_path("relative/path").is_err());
+    }
+
+    fn manifest_json(canaries: Value) -> Value {
+        json!({
+            "manifest": MANIFEST_KIND, "version": 1, "revision": "test-dup",
+            "signer_kid": "canary-subkey-test",
+            "canaries": canaries,
+            "credential": {"slot": "QOMPASS_DEPLOY_TOKEN", "value": "canary-deadbeef-token"},
+            "fixture": true, "signature": "AAAA",
+        })
+    }
+
+    fn site_with_manifest(value: &Value) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("broadside-manifest-{}-{nanos}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("honeypot")).expect("mkdir");
+        std::fs::write(
+            dir.join(MANIFEST_PATH),
+            serde_json::to_string(value).expect("serialize"),
+        )
+        .expect("write manifest");
+        dir
+    }
+
+    #[test]
+    fn load_manifest_rejects_duplicate_canary_paths() {
+        // Adversarial (H6): the same path twice, or two paths
+        // that land on one dist file, would let one canary stand
+        // in for another; the manifest is rejected at load.
+        let same = manifest_json(json!([
+            {"path": "/.env", "kind": "env"},
+            {"path": "/.env", "kind": "env"},
+        ]));
+        let dir = site_with_manifest(&same);
+        assert!(load_manifest(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+        let colliding = manifest_json(json!([
+            {"path": "/admin/", "kind": "page"},
+            {"path": "/admin/index.html", "kind": "page"},
+        ]));
+        let dir = site_with_manifest(&colliding);
+        assert!(load_manifest(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_manifest_rejects_canary_set_above_bound() {
+        // Adversarial: a canary set above the 1..=64 bound is
+        // refused at load, not partially injected.
+        let many: Vec<Value> = (0..65)
+            .map(|i| json!({"path": format!("/decoy-{i}"), "kind": "page"}))
+            .collect();
+        let dir = site_with_manifest(&manifest_json(json!(many)));
+        assert!(load_manifest(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

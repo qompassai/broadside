@@ -552,4 +552,22 @@ mod tests {
         assert_eq!(receipt["result"], json!("refused"));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn deploy_refuses_when_verify_receipt_covers_a_different_hash() {
+        // Adversarial: a passing verify for one dist must not
+        // authorize deploying another, however the call is framed.
+        let (dir, cfg) = fixture_cfg();
+        let log: ReceiptLog = cfg.receipts();
+        log.append(json!({
+            "action": "verify", "site_head": null, "inputs": {},
+            "outputs": {"dist_hash": "some-other-hash"},
+            "gates": [], "result": "pass",
+        }))
+        .expect("verify receipt");
+        let manifest = manifest_of(&cfg.dist()).expect("manifest");
+        let receipt = deploy(&cfg, &manifest.tree_hash, true, false).expect("refusal receipt");
+        assert_eq!(receipt["result"], json!("refused"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
