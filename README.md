@@ -1,4 +1,5 @@
 # broadside
+[![crates.io](https://img.shields.io/crates/v/broadside-mcp.svg)](https://crates.io/crates/broadside-mcp)
 
 A small deterministic Rust MCP server that builds, verifies, and
 deploys [qompass.ai](https://qompass.ai) — and publishes the estate's
