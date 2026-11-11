@@ -1,6 +1,7 @@
 [package]
 name = "broadside-mcp"
 version = "1.0.0"
+authors = ["Qompass AI"]
 edition = "2024"
 license = "Apache-2.0"
 description = "Deterministic build, verify, and deploy MCP server for qompass.ai: signed JWKS publication, append-only receipts, honeypot canary layer."
