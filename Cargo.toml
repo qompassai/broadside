@@ -12,6 +12,11 @@ homepage = "https://qompass.ai/solutions/mcp/broadside"
 name = "broadside-mcp"
 path = "src/main.rs"
 
+# The fleet TUI pattern (D-1562): the TUI is its own crate inside
+# this repo, programming against the broadside-mcp library above.
+[workspace]
+members = ["crates/broadside-tui"]
+
 [dependencies]
 base64 = "0.22"
 ed25519-dalek = "2"

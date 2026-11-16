@@ -1,0 +1,22 @@
+# broadside trigger rules (fleet TUI programme DESIGN §D4).
+#
+# Rules are data, not code: a rule not present in this file and not
+# visible in the TUI's Fleet panel does not exist. Every rule carries
+# its BLOCH lane-law birth labels (origin_lane + content_label,
+# D-1030); broadside is qompass/sfw.
+#
+# deploy.verified fires when a deploy stage completes with the
+# member's own result "pass" — that receipt already proves the
+# identical-hash verify gate and the live read-back inside
+# broadside's deploy machinery. The candidate is a draft: bloch's
+# own intake decides acceptance.
+
+[[rule]]
+id = "broadside-deploy-verified-to-bloch-lesson"
+origin_lane = "qompass"
+content_label = "sfw"
+on = { event = "deploy.verified", where = "result == pass" }
+then = { mcp = "bloch", tool = "lesson_candidate", args_from = "event" }
+mode = "auto"
+idempotency = "event-hash"
+max_depth = 1

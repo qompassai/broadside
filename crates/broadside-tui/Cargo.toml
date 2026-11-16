@@ -1,0 +1,26 @@
+[package]
+name = "broadside-tui"
+version = "0.1.0"
+authors = ["Qompass AI"]
+edition = "2024"
+license = "Apache-2.0"
+description = "Fleet-pattern TUI for broadside: build/verify/deploy console, signed-receipt viewer, honeypot status, bloch trigger rule."
+repository = "https://github.com/qompassai/broadside"
+homepage = "https://qompass.ai/solutions/mcp/broadside"
+
+[[bin]]
+name = "broadside-tui"
+path = "src/main.rs"
+
+[dependencies]
+# The member's own library: status, pipeline, deploy, and the
+# receipt-chain verification machinery the viewer reports from.
+broadside-mcp = { path = "../.." }
+# ratatui + crossterm: the fleet TUI pattern's rendering pair
+# (phlow-tui precedent). Panels are pure widget constructors.
+ratatui = "0.30"
+crossterm = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# toml: triggers.toml rule files (DESIGN §D4, data not code).
+toml = "0.8"
