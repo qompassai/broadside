@@ -15,12 +15,26 @@
 //!
 //! Every fetched body is also H3-scanned: a source serving an
 //! agent-directed payload is quarantined and fails closed.
+//!
+//! Publisher pages (the URL route) additionally pass through
+//! the extraction layer (crate::extract): the page is extracted
+//! to markdown with svipall-extract (pinned, default options)
+//! and the extracted markdown is screened as well as the raw
+//! body — the union decides hostility. Extraction alone is not
+//! the screen: its hidden-text removal covers inline styles and
+//! attributes, but class-hidden text reaches the markdown
+//! unmarked, and the screen over the extract is what catches a
+//! payload carried that way (or split by markup in the raw
+//! body). Registry metadata routes (Crossref / DataCite /
+//! doi.org) fetch JSON records, not pages; they keep the
+//! raw-body screen only.
 
 use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Value, json};
 
+use crate::extract::{ExtractionRecord, extract_and_screen, looks_like_html, wall_kind};
 use crate::http;
 use crate::sources::{SourceRegistry, scan_for_injection};
 
@@ -282,6 +296,10 @@ pub struct CitationReport {
     pub failures: Vec<CitationOutcome>,
     /// Sources newly quarantined during this run (H3).
     pub newly_hostile: Vec<(String, String)>,
+    /// Receipted extraction records for fetched publisher pages
+    /// (H3 extraction layer): full size, cap, truncated flag,
+    /// wall kind, integrity label — per extraction, never silent.
+    pub extractions: Vec<ExtractionRecord>,
 }
 
 impl CitationReport {
@@ -301,6 +319,7 @@ impl CitationReport {
             "newly_hostile": self.newly_hostile.iter().map(|(k, r)| json!({
                 "source": k, "reason": r,
             })).collect::<Vec<_>>(),
+            "extractions": self.extractions.iter().map(|r| r.to_json()).collect::<Vec<_>>(),
         })
     }
 }
@@ -328,8 +347,9 @@ impl Verifier {
     ) -> CitationReport {
         let mut outcomes: Vec<CitationOutcome> = Vec::new();
         let mut newly_hostile: Vec<(String, String)> = Vec::new();
+        let mut extractions: Vec<ExtractionRecord> = Vec::new();
         for citation in citations {
-            let outcome = self.verify_one(citation, registry, &mut newly_hostile);
+            let outcome = self.verify_one(citation, registry, &mut newly_hostile, &mut extractions);
             outcomes.push(outcome);
         }
         let mut classes: Vec<(String, usize)> = Vec::new();
@@ -346,6 +366,7 @@ impl Verifier {
             by_class: classes,
             failures: outcomes.into_iter().filter(|o| !o.ok).collect(),
             newly_hostile,
+            extractions,
         }
     }
 
@@ -354,6 +375,7 @@ impl Verifier {
         citation: &Citation,
         registry: &mut SourceRegistry,
         newly_hostile: &mut Vec<(String, String)>,
+        extractions: &mut Vec<ExtractionRecord>,
     ) -> CitationOutcome {
         let key = citation.key.clone();
         if registry.is_hostile(&key) {
@@ -366,7 +388,7 @@ impl Verifier {
         }
         let (class, result) = match &citation.kind {
             CitationKind::Doi(doi) => self.verify_doi(doi),
-            CitationKind::Url(url) => self.verify_url(url),
+            CitationKind::Url(url) => self.verify_url(url, extractions),
         };
         match result {
             Ok(detail) => {
@@ -513,12 +535,49 @@ impl Verifier {
     /// DOIs): any HTTP response proves the reference exists —
     /// publisher bot-walls (403) are liveness, not absence. Only
     /// 404/410, 5xx, and transport failure fail the citation.
-    fn verify_url(&self, url: &str) -> (String, Result<String, HostilityOr>) {
+    fn verify_url(
+        &self,
+        url: &str,
+        extractions: &mut Vec<ExtractionRecord>,
+    ) -> (String, Result<String, HostilityOr>) {
         let class = class_for_url(url);
         let result = match http::get(url) {
             Ok(fetch) => {
                 let body = String::from_utf8_lossy(&fetch.body).to_string();
-                if let Some(patterns) = hostile_in(&body) {
+                // Extraction layer: HTML pages are extracted to
+                // markdown and the EXTRACT is screened in addition
+                // to the raw body — the union decides. The extract
+                // screen catches what the raw scan cannot: payloads
+                // split by markup, and class-hidden payloads the
+                // extractor (inline/attribute hiding only) lets
+                // through. The extraction is receipted into the
+                // report either way.
+                let extraction = if looks_like_html(&body) {
+                    Some(extract_and_screen(&body))
+                } else {
+                    None
+                };
+                let wall = wall_kind(fetch.status, &body, extraction.as_ref());
+                if let Some(found) = &extraction {
+                    extractions.push(ExtractionRecord {
+                        source: url.to_string(),
+                        wall_kind: wall.clone(),
+                        integrity: found.integrity.clone(),
+                        integrity_reasons: found.integrity_reasons.clone(),
+                        full_bytes: found.full_bytes,
+                        cap: found.cap,
+                        truncated: found.truncated,
+                    });
+                }
+                let mut patterns = scan_for_injection(&body);
+                if let Some(found) = &extraction {
+                    for pattern in &found.patterns {
+                        if !patterns.contains(pattern) {
+                            patterns.push(pattern.clone());
+                        }
+                    }
+                }
+                if !patterns.is_empty() {
                     return ("hostile".to_string(), Err(HostilityOr::Hostile(patterns)));
                 }
                 match fetch.status {
@@ -531,12 +590,25 @@ impl Verifier {
                         fetch.status
                     ))),
                     status => Ok(format!(
-                        "url: HTTP {status}{}",
+                        "url: HTTP {status}{} [wall: {wall}{}]",
                         if fetch.truncated {
                             " (body truncated; scan covered the received prefix)"
                         } else {
                             ""
-                        }
+                        },
+                        match &extraction {
+                            Some(found) => format!(
+                                "; integrity: {}; extract {} bytes{}",
+                                found.integrity,
+                                found.full_bytes,
+                                if found.truncated {
+                                    format!(" (retained capped at {})", found.cap)
+                                } else {
+                                    String::new()
+                                },
+                            ),
+                            None => String::new(),
+                        },
                     )),
                 }
             }
