@@ -24,12 +24,12 @@ about the past comes from this log, chain-verified on read.
 | `seq`       | int    | 1-based sequence number, gapless |
 | `ts`        | string | RFC 3339 UTC (`...Z`), second precision |
 | `actor`     | string | `"broadside-mcp/<version>"` |
-| `action`    | string | `build` \| `verify` \| `deploy` \| `live_check` \| `quarantine` |
+| `action`    | string | `build` \| `verify` \| `deploy` \| `live_check` \| `quarantine` \| `census` |
 | `site_head` | string \| null | site tree git HEAD at action time |
 | `inputs`    | object | the action's inputs (hashes, flags, target) |
 | `outputs`   | object | the action's outputs (dist manifest, findings, read-back) |
 | `gates`     | array  | `{name, result, detail}` per gate; result ∈ `pass` \| `fail` \| `skip` |
-| `result`    | string | per action: `pass` \| `fail` (+ `refused` for deploy, `drift` \| `alert` for live_check, `alert` for quarantine) |
+| `result`    | string | per action: `pass` \| `fail` (+ `refused` for deploy, `drift` \| `alert` for live_check, `alert` for quarantine; census is `pass` \| `fail` only) |
 | `prev_hash` | string | previous receipt's `hash`; `""` for seq 1 |
 | `hash`      | string | SHA-256 hex of this receipt's RFC 8785 canonical form with `hash` removed |
 
@@ -57,6 +57,20 @@ the on-disk dist's recomputed hash — all three, or no deploy.
 - **quarantine** receipts are written when the citation pipeline
   newly blacklists a source (H3): `inputs.source`,
   `outputs.reason`. One receipt per new quarantine.
+- **census** receipts are written by `broadside_census`
+  (CENSUS.md C5): `inputs` carry `window` (`hour` \| `day` \|
+  `30d`), `log_sha256` (the fetched access-log slice),
+  `robots_sha256` (the deployed robots.txt the stamps were
+  computed against), and `canary_manifest` (the honeypot
+  manifest revision whose path list supplied the canary-touch
+  cross-reference, or null). A passing receipt's `outputs` carry
+  the full census `document`, its `document_sha256`, and the
+  `document_path` it was stored at under the state dir; the one
+  gate is `census_run`. A failed run (unreadable, truncated, or
+  refused window) appends `result: "fail"` with empty outputs —
+  a partial census is never recorded as a whole one. Census
+  documents are unsigned at v1 and permanent; the raw log slice
+  is not retained.
 - Fixture involvement is never hidden: build/verify receipts name
   `jwks_fixture` / canary `fixture` flags from the records used.
 
