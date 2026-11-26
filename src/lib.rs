@@ -10,6 +10,7 @@ pub mod config;
 pub mod crypto;
 pub mod deploy_live;
 pub mod dist;
+pub mod extract;
 pub mod guard;
 pub mod h4;
 pub mod honeypot;

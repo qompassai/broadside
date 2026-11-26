@@ -22,6 +22,9 @@ rmcp = { version = "=3.8.0", default-features = false, features = ["server"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# H3 extraction layer (2026-11-26 gate): pinned exactly; the gate
+# harness is the re-probe on any bump. MIT OR Apache-2.0.
+svipall-extract = "=2.2.0"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
