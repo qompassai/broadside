@@ -5,6 +5,8 @@
 #![forbid(unsafe_code)]
 
 pub mod canonical;
+pub mod census;
+pub mod census_dns;
 pub mod citations;
 pub mod config;
 pub mod crypto;

@@ -1,8 +1,9 @@
 //! broadside — deterministic build, verify, and deploy MCP
 //! server for qompass.ai (stdio).
 //!
-//! Five tools (broadside_status, broadside_live_check,
-//! broadside_build, broadside_verify, broadside_deploy), an
+//! Six tools (broadside_status, broadside_live_check,
+//! broadside_build, broadside_verify, broadside_deploy,
+//! broadside_census), an
 //! append-only hash-chained receipt log (broadside.receipt v1)
 //! that vongola consumes read-only, the Agent Card JWKS duty
 //! (published from a signed key record, fail-closed), and the

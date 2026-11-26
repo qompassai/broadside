@@ -1,4 +1,4 @@
-//! The rmcp server: broadside's five tools and two resources.
+//! The rmcp server: broadside's six tools and two resources.
 //!
 //! Framing follows the fleet pattern (lupin/phaedrus WS2 shape):
 //! the era guard owns the stdio front door (see `guard.rs`), the
@@ -22,6 +22,7 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
+use crate::census;
 use crate::config::Config;
 use crate::deploy_live;
 use crate::pipeline;
@@ -58,6 +59,13 @@ fn tool_definitions() -> Vec<Tool> {
                 "confirm": {"type": "boolean", "description": "Must be true: per-call confirmation that this exact hash may ship to the configured target."},
                 "dry_run": {"type": "boolean", "description": "When true, rsync runs with --dry-run and no read-back is attempted."}
             }, "required": ["dist_hash", "confirm"]}),
+        ),
+        (
+            "broadside_census",
+            "Read-only census of the bot traffic in the host access log (CENSUS.md C1-C5): sessionised species table with orders, Passport Control verification (VERIFIED/UNVERIFIED/IMPOSTOR - impostor sessions are never counted under the claimed name), robots.txt stamps (FOLLOWED/DEFIED/SKIPPED/UNTESTED/SENT), canary-touch flags from the signed manifest's path list, and window totals (bot vs browser, malformed lines). Appends a census receipt (action census) and stores the census document under the state dir; a truncated or unreadable window fails the run closed - never a partial census. The public projection generator exists in code but stays dark at v1: no tool exposes it.",
+            json!({"type": "object", "properties": {
+                "window": {"type": "string", "enum": ["hour", "day", "30d"], "description": "Rollup window, anchored at the newest entry in the fetched log slice. Defaults to day."}
+            }}),
         ),
     ];
     specs
@@ -136,6 +144,10 @@ fn call_tool(cfg: &Config, name: &str, args: &Value) -> CallToolResult {
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
             receipt_result(deploy_live::deploy(cfg, dist_hash, confirm, dry_run))
+        }
+        "broadside_census" => {
+            let window = args.get("window").and_then(Value::as_str).unwrap_or("day");
+            receipt_result(census::run_census(cfg, window))
         }
         _ => err_result("unknown tool"),
     }
@@ -254,7 +266,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn catalog_has_the_five_programme_tools() {
+    fn catalog_has_the_six_programme_tools() {
         let tools = tool_definitions();
         let names: Vec<String> = tools.iter().map(|t| t.name.to_string()).collect();
         assert_eq!(
@@ -264,7 +276,8 @@ mod tests {
                 "broadside_live_check",
                 "broadside_build",
                 "broadside_verify",
-                "broadside_deploy"
+                "broadside_deploy",
+                "broadside_census"
             ]
         );
         for tool in &tools {

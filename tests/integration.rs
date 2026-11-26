@@ -111,7 +111,7 @@ fn classic_initialize_is_refused_with_typed_error() {
 }
 
 #[test]
-fn discover_advertises_exactly_one_version_and_five_tools() {
+fn discover_advertises_exactly_one_version_and_six_tools() {
     let mut session = spawn_session(&[]);
     let discover = session.request(&modern_frame(1, "server/discover", json!({})));
     let versions = discover["result"]["supportedVersions"].clone();
@@ -123,7 +123,7 @@ fn discover_advertises_exactly_one_version_and_five_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(names.len(), 5);
+    assert_eq!(names.len(), 6);
     assert!(names.iter().all(|n| n.starts_with("broadside_")));
     // Schema discipline: every tool's input schema carries an
     // object `properties` (never null — the fleet's D-1210 lesson).
