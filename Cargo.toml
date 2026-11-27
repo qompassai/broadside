@@ -27,3 +27,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [profile.release]
 lto = true
+
+[[bench]]
+name = "hot_paths"
+harness = false
